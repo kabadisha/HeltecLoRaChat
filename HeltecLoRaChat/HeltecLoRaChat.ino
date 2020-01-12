@@ -1,23 +1,46 @@
-// USB UART Drivers:
-// https://www.silabs.com/products/development-tools/software/usb-to-uart-bridge-vcp-drivers
-// Needed to get the COM port to show up in the Arduino IDE
-
-// Device SDK & Docs:
-// https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series
-
-// Board Manager URL:
-// https://docs.heltec.cn/download/package_heltec_esp32_index.json
+/* 
+ *  USB UART Drivers:
+ *  https://www.silabs.com/products/development-tools/software/usb-to-uart-bridge-vcp-drivers
+ *  Needed to get the COM port to show up in the Arduino IDE
+ *  
+ *  Device SDK & Docs:
+ *  https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series
+ *  
+ *  Board Manager URL:
+ *  https://docs.heltec.cn/download/package_heltec_esp32_index.json
+ *  
+ *  The onboard OLED display is SSD1306 driver and I2C interface. In order to make the
+ *  OLED correctly operation, you should output a high-low-high(1-0-1) signal by soft-
+ *  ware to OLED's reset pin, the low-level signal at least 5ms.
+ *  
+ *  OLED pins to ESP32 GPIOs via this connection:
+ *  OLED_SDA -- GPIO4
+ *  OLED_SCL -- GPIO15
+ *  OLED_RST -- GPIO16
+ *  
+ *  PIN Reference:
+ *  GPIO5 — SX1278’s SCK
+ *  GPIO19 — SX1278’s MISO
+ *  GPIO27 — SX1278’s MOSI
+ *  GPIO18 — SX1278’s CS
+ *  GPIO14 — SX1278’s RESET
+ *  GPIO26 — SX1278’s IRQ(Interrupt Request)
+ */
 
 // Includes
-#include <SSD1306Wire.h> // you need to install the ESP8266 oled driver for SSD1306 
-// by Daniel Eichorn and Fabrice Weinberg to get this file!
-// It's in the arduino library manager :-D
-// https://github.com/ThingPulse/esp8266-oled-ssd1306
-
+#include <SSD1306Wire.h>
+/*
+ * you need to install the ESP8266 oled driver for SSD1306
+ * by Daniel Eichorn and Fabrice Weinberg to get this file!
+ * It's in the arduino library manager :-D
+ * https://github.com/ThingPulse/esp8266-oled-ssd1306
+ */
 #include <SPI.h>
-#include <LoRa.h>    // this is the one by Sandeep Mistry, 
-// (also in the Arduino Library manager :D )
-// https://github.com/sandeepmistry/arduino-LoRa
+#include <LoRa.h>
+/*
+ * This is the one by Sandeep Mistry (also in the Arduino Library manager)
+ * https://github.com/sandeepmistry/arduino-LoRa
+ */
 
 // display descriptor
 SSD1306Wire display(0x3c, 4, 15);
