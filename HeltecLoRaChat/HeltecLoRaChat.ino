@@ -50,14 +50,12 @@ SSD1306Wire display(0x3c, 4, 15);
 #define SS 18
 #define RST 14
 #define DI0 26
-// #define BAND 429E6
 
 // LoRa Settings
-#define BAND 434500000.00
-#define spreadingFactor 9
-// #define SignalBandwidth 62.5E3
-#define SignalBandwidth 31.25E3
-#define codingRateDenominator 8
+#define BAND 868E6 // You can set band here directly, e.g. 433E6, 470E6, 868E6, 915E6
+#define spreadingFactor 10 // Supported values are between 6 and 12.
+#define SignalBandwidth 31.25E3 // Supported values are 7.8E3, 10.4E3, 15.6E3, 20.8E3, 31.25E3, 41.7E3, 62.5E3, 125E3, and 250E3
+#define codingRateDenominator 8 // Supported values are between 5 and 8, these correspond to coding rates of 4/5 and 4/8. The coding rate numerator is fixed at 4.
 #define preambleLength 8
 
 // we also need the following config data:
@@ -93,13 +91,13 @@ String mac2str(int mac)
 
 // let's set stuff up! 
 void setup() {
-  // reset the screen
+  // Reset the display
   pinMode(16, OUTPUT);
   digitalWrite(16, LOW); // set GPIO16 low to reset OLED
   delay(50);
   digitalWrite(16, HIGH);
   Serial.begin(115200);
-  while (!Serial); //If just the the basic function, must connect to a computer
+  while (!Serial); // If just the the basic function, must connect to a computer
 
   // Initialising the UI will init the display too.
   display.init();
@@ -124,24 +122,29 @@ void setup() {
   Serial.print("LoRa Signal Bandwidth: ");
   Serial.println(SignalBandwidth);
   LoRa.setSignalBandwidth(SignalBandwidth);
-
   LoRa.setCodingRate4(codingRateDenominator);
-
   LoRa.setPreambleLength(preambleLength);
+
+  /* Radios with different Sync Words will not receive each other's transmissions.
+   * This is one way you can filter out radios you want to ignore, without making an addressing scheme.
+   */
+  LoRa.setSyncWord(0x64); // byte value to use as the sync word, defaults to 0x12
 
   Serial.println("LoRa Initial OK!");
   display.drawString(5, 20, "LoRaChat is running!");
   display.display();
   delay(2000);
+  
   Serial.println("Welcome to LoRaCHAT!");
   // get MAC as initial Nick
   int MAC = ESP.getEfuseMac();
   displayName = mac2str(MAC);
-  //displayName.trim(); // remove the newline
+  
   Serial.print("Initial nick is "); Serial.println(displayName);
   Serial.println("Use /? for command help...");
   Serial.println(": ");
   display.clear();
+  
   display.drawString(5, 20, "Nickname set:");
   display.drawString(20, 30, displayName);
   display.display();
