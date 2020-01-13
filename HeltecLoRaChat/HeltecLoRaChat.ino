@@ -13,12 +13,16 @@
  *  OLED correctly operation, you should output a high-low-high(1-0-1) signal by soft-
  *  ware to OLED's reset pin, the low-level signal at least 5ms.
  *  
- *  OLED pins to ESP32 GPIOs via this connection:
+ *  ESP32 Pin Reference:
+ *  GPIO25 - LED
+ *  GPIO13 - For battery voltage detection
+ *  
+ *  OLED pins:
  *  OLED_SDA -- GPIO4
  *  OLED_SCL -- GPIO15
  *  OLED_RST -- GPIO16
  *  
- *  PIN Reference:
+ *  SX1278 LoRa Pins:
  *  GPIO5 — SX1278’s SCK
  *  GPIO19 — SX1278’s MISO
  *  GPIO27 — SX1278’s MOSI
@@ -42,10 +46,32 @@
  * https://github.com/sandeepmistry/arduino-LoRa
  */
 
+// Bluetooth libraries
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+BLECharacteristic *pCharacteristic;
+bool deviceConnected = false;
+float txValue = 0;
 // display descriptor
 SSD1306Wire display(0x3c, 4, 15);
 
-// definitions
+#define FullBatteryVoltage 3700 // A normal 1S LiPo battery is 3700mv when fully charged.
+float XS = 0.00225; //The returned reading is multiplied by this XS to get the battery voltage.
+uint16_t MUL = 1000;
+uint16_t MMUL = 100;
+
+const long batteryCheckInterval = 10000;
+unsigned long previousBatteryCheckMillis = 0;
+
+const int ledPin = 25;
+int ledState = LOW;
+const long ledBlinkInterval = 100;
+unsigned long previousLedBlinkMillis = 0;
+int remainingLedBlinks = 0;
+
 //SPI defs for LoRa radio
 #define SS 18
 #define RST 14
@@ -57,14 +83,6 @@ SSD1306Wire display(0x3c, 4, 15);
 #define SignalBandwidth 31.25E3 // Supported values are 7.8E3, 10.4E3, 15.6E3, 20.8E3, 31.25E3, 41.7E3, 62.5E3, 125E3, and 250E3
 #define codingRateDenominator 8 // Supported values are between 5 and 8, these correspond to coding rates of 4/5 and 4/8. The coding rate numerator is fixed at 4.
 #define preambleLength 8
-
-// we also need the following config data:
-// GPIO5 — SX1278’s SCK
-// GPIO19 — SX1278’s MISO
-// GPIO27 — SX1278’s MOSI
-// GPIO18 — SX1278’s CS
-// GPIO14 — SX1278’s RESET
-// GPIO26 — SX1278’s IRQ(Interrupt Request)
 
 // misc vars
 String msg;
@@ -78,8 +96,7 @@ String mac2str(int mac)
 {
   String s;
   byte *arr = (byte*) &mac;
-  for (byte i = 0; i < 6; ++i)
-  {
+  for (byte i = 0; i < 6; ++i) {
     char buff[3];
     // yea, this is a sprintf... fite me...
     sprintf(buff, "%2X", arr[i]);
@@ -89,8 +106,68 @@ String mac2str(int mac)
   return s;
 }
 
-// let's set stuff up! 
+void blinkLED(int count) {
+  remainingLedBlinks = count;
+}
+
+void blinkCheck() {
+  if (remainingLedBlinks > 0) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousLedBlinkMillis >= ledBlinkInterval) {
+      // save the last time you blinked the LED
+      previousLedBlinkMillis = currentMillis;
+  
+      // if the LED is off turn it on and vice-versa:
+      if (ledState == LOW) {
+        ledState = HIGH;
+        remainingLedBlinks--;
+      } else {
+        ledState = LOW;
+      }
+  
+      // set the LED with the ledState of the variable:
+      digitalWrite(ledPin, ledState);
+    }
+  } else {
+    // Always set the LED off again at the end
+    ledState = LOW;
+    digitalWrite(ledPin, ledState);
+  }
+}
+
+void checkBattery() {
+  unsigned long currentMillis = millis();
+  if (previousBatteryCheckMillis == 0 || (currentMillis - previousBatteryCheckMillis >= batteryCheckInterval)) {
+    // save the last time you checked
+    previousBatteryCheckMillis = currentMillis;
+
+    // Read the battery
+    uint16_t batteryMilliVolts  =  analogRead(13)*XS*MUL;
+    uint16_t batteryPercentage  =  (analogRead(13)*XS*MUL*MMUL)/FullBatteryVoltage;
+
+    display.setColor(BLACK);
+    display.fillRect(0, 0, 128, 12);
+    display.setColor(WHITE);
+    
+    display.drawString(0, 0, "VBAT:");
+    display.drawString(35, 0, (String)batteryMilliVolts);
+    display.drawString(60, 0, "(mV)");
+    display.drawString(90, 0, (String)batteryPercentage);
+    display.drawString(98, 0, ".");
+    display.drawString(107, 0, "%");
+    display.display();
+  }
+}
+
 void setup() {
+  // Setup battery voltage readings
+  adcAttachPin(13);
+  analogSetClockDiv(255); // 1338mS
+
+  // Set up the LED
+  pinMode(25, OUTPUT);
+  digitalWrite(25, LOW);
+  
   // Reset the display
   pinMode(16, OUTPUT);
   digitalWrite(16, LOW); // set GPIO16 low to reset OLED
@@ -152,6 +229,7 @@ void setup() {
 }
 
 void loop() {
+  
   // Receive a message first...
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
@@ -178,9 +256,10 @@ void loop() {
         switch (cmd[0]){
           case '?':
             Serial.println("Supported Commands:");
-            Serial.println("/? - this message...");
-            Serial.println("/n - change Tx nickname...");
-            Serial.println("/d - print Tx nickname...");
+            Serial.println("/? - This message");
+            Serial.println("/n Name - Change Tx nickname");
+            Serial.println("/d - Display Tx nickname");
+            Serial.println("/b - Blink LED");
             break;
           case 'n':
             displayName = msg.substring(2);
@@ -189,15 +268,17 @@ void loop() {
           case 'd':
             Serial.print("Your display name is: "); Serial.println(displayName);
             break;
+          case 'b':
+            Serial.print("Blinking LED"); blinkLED(10);
+            break;
           default:
-            Serial.println("command not known... use '/?' for help...");
+            Serial.println("Command not known. Use '/?' for help.");
         }
         msg = "";
-      }
-      else {
-        // ssshhhhhhh ;)
+        
+      } else {
         Serial.print("Me: "); Serial.println(msg);
-        // assemble message
+        // Assemble message
         sendMsg += displayName;
         sendMsg += "> ";
         sendMsg += msg;
@@ -208,14 +289,16 @@ void loop() {
         display.clear();
         display.drawString(1, 0, sendMsg);
         display.display();
-        // clear the strings and start again :D
+        
+        // Clear the strings and start again
         msg = "";
         sendMsg = "";
         Serial.print(": ");
       }
-    }
-    else {
+    } else {
       msg += chr;
     }
   }
+  checkBattery();
+  blinkCheck();
 }
